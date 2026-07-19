@@ -43,7 +43,9 @@ class MyConcepts(Concepts):
 engine = TemplateEngine(MyConcepts(), "CAUSAL")
 engine.register_pack("my_pack", 10, "lowest")  # creates a pack to organize the data.
 _ = engine.register_template
-_("Once upon a time, the time was ${integer}, and what I'm saying is ${boolean}")
+_("Once upon a time, the time was ${integer}, and what I'm saying is ${boolean}. \
+I say ${history|adding_to_history=clerk} and last time I said ${history|index_behind_newest=1}"
+  )# Note the spacing, No space before or after =. Escape =s and {}s via \. 
 dt_and_helper: tuple[NDArray, FixingHelper] = engine.eval()
 dataset = dt_and_helper[0]
 helper = dt_and_helper[1]
@@ -70,7 +72,7 @@ from typing import Any
 # Training
 
 visualizers = [
-    BuiltinVisualizers.Controller(minimum_loss=.5, maximum_loss=10),
+    BuiltinVisualizers.Controller,
 #    BuiltinVisualizers.Seaplot(update_every=10) In Development
 ]
 kwargs = [
