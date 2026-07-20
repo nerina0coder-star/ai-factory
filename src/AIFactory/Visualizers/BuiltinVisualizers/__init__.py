@@ -1,4 +1,4 @@
-from .Seaplot import Seaplot
+# from .Seaplot import Seaplot
 from .Controller import Controller
 
-__all__ = ["Seaplot", "Controller"]
+__all__ = ["Controller"]

@@ -92,6 +92,7 @@ class TemplateEngine:
         self.style = style
         self.chat_template = kwargs.get("chat_template")
         self.roles = kwargs.get("roles")
+        self.__last_pack__ = ""
         self.__functions__ = concepts.__map__
         self.__zones__: List[int] = []
         self.__last_evaluated__: List[np.typing.NDArray] = []
@@ -152,7 +153,7 @@ class TemplateEngine:
         return len(self.__packs__)
 
     def register_template(self,
-                          pack_name: str,
+                          pack_name: str|None = None,
                           qa: list | None = None,
                           template: str | None = None,
                           importance: int = None,
@@ -180,6 +181,15 @@ class TemplateEngine:
             for i in self.__zones__:
                 importance *= i
 
+        # Handling packs
+        if pack_name is None:
+            pack_name = self.__last_pack__
+        self.__last_pack__ = pack_name
+
+
+
+        if pack_name is None and not self.__last_pack__:
+            raise ValueError("The given pack_name is None and the last used pack is also None.")
         if not self.__zones__ and zone_end:
             raise RuntimeError("Cannot end a zone that's not started")
         if not all(item is not None for item in [importance, zone_start, zone_end]):
@@ -208,6 +218,7 @@ class TemplateEngine:
                 item = {}
                 item.setdefault("role", self.roles[i])
                 item.setdefault("content", qa[i])
+                items.append(item)
             registering = self.chat_template(
                 items,
                 add_generation_prompt=False,
@@ -246,8 +257,8 @@ class TemplateEngine:
                 used_params = list(str(param) for param in param_usage.findall(params))
                 for par in used_params:
                     par = str(par)
-                    kname = get_kname.match(par).group()[:-1]
-                    kval = get_kval.search(par).group()[2:].replace(r"\,", ",").replace(r"\=", "=")
+                    kname = get_kname.match(par).group()[:-1].strip()
+                    kval = get_kval.search(par).group()[2:].replace(r"\=", "=").strip() # TODO change the kwarg parameter matching to slicing instead of regex
                     used['params'].setdefault(item, {}).setdefault({kname: kval})
         template = [registering, used]
         pack: dict = list(filter(lambda x: x.get("name") == pack_name, self.__packs__))[0]
@@ -392,7 +403,7 @@ class TemplateEngine:
                     full = fulls[index]
 
                     evaluated = funcs[concept](**param)
-                    adding = complete.replace(full, evaluated)
+                    adding = complete.replace(full, str(evaluated))
 
                 out = np.append(out, [adding])
 
