@@ -1,4 +1,4 @@
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from typing import Literal, List, Tuple, Dict, Iterator
 
 from torch.nn import Parameter
@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from transformers import TrainingArguments, TrainerState, PreTrainedModel
 
 
-class AbstractVisualizer(metaclass=ABCMeta):
+class AbstractVisualizer(ABC):
 
     @abstractmethod
     def initialize(self,
