@@ -1,0 +1,14 @@
+# gitignore
+# For Development
+
+.venv
+.idea
+test*
+trainer_output
+example.py
+pyproject.toml
+__pycache__
+dist
+
+# In Development
+/src/AIFactory/Visualizers/BuiltinVisualizers/Seaplot.py
