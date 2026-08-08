@@ -37,7 +37,7 @@ class Trainer:
         if not isinstance(config, Config):
             raise TypeError("config must be a Config object")
         self.__config__ = config
-        self.__model__ = config.__model__
+        self.__model__ = config._model
 
     def load_adapter(self, path: str):
         if isinstance(self.__model__, PeftModel):
@@ -57,7 +57,7 @@ class Trainer:
               dataset_label: str = "label",
               max_threads: int = None,
               log_every: int = 10
-    ): # TODO Add a bitsandbytes configuration setup
+    ):
         """
         Prepares the object for the training.
 
@@ -130,9 +130,9 @@ class Trainer:
                     task_type=TaskType.CAUSAL_LM,
                     lora_alpha=64,
                     lora_dropout=0.1,
-                    r=self.__config__.__rank__,
-                    target_modules=self.__config__.__attn_layers__,
-                    fan_in_fan_out=self.__config__.__fifo__,
+                    r=self.__config__._rank,
+                    target_modules=self.__config__._attn_layers,
+                    fan_in_fan_out=self.__config__._fifo,
                 )
         except Exception as _:
             raise RuntimeError("An Exception acquired, make sure you have called Trainer.set_config() before.")
@@ -143,15 +143,15 @@ class Trainer:
             datacollator = DataCollatorForLanguageModeling(
                 mlm=False,
                 pad_to_multiple_of=None,
-                tokenizer=self.__config__.__tokenizer__,
+                tokenizer=self.__config__._tokenizer,
             )
 
-        cpu_only = self.__config__.__cpu_only__
+        cpu_only = self.__config__._cpu_only
 
         dataset = load_dataset("parquet", data_files=path_to_parquet)
 
         def tokenize(txt):
-            return self.__config__.__tokenizer__(txt[dataset_label], truncation=False, padding=True, return_tensors="pt")
+            return self.__config__._tokenizer(txt[dataset_label], truncation=False, padding=True, return_tensors="pt")
 
         dtset = dataset.map(tokenize, batched=True, remove_columns=[dataset_label])
 
@@ -163,7 +163,7 @@ class Trainer:
                 #---
                 num_train_epochs=self.__config__.epochs,
                 per_device_train_batch_size=self.__config__.batch_size,
-                learning_rate=self.__config__.__lr__,
+                learning_rate=self.__config__._lr,
                 #---
                 fp16=not cpu_only,
                 dataloader_pin_memory=not cpu_only,
@@ -270,7 +270,7 @@ class Trainer:
         try:
             if self.__trained__:
                 model = self.__model__
-                tokenizer = self.__config__.__tokenizer__
+                tokenizer = self.__config__._tokenizer
                 if isinstance(model, PeftModel):
                     model = model.merge_and_unload()
                 TrainerHelper.remove_prefix("base_model.model.", model)

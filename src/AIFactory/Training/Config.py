@@ -1,11 +1,13 @@
 import json
+from collections.abc import Iterable
 from os import PathLike
 from pathlib import Path
 from typing import List, Literal
 
+from peft import prepare_model_for_kbit_training
 from torch import float16, float32, float64
 from transformers import AutoModelForCausalLM, AutoTokenizer, TokenizersBackend, SentencePieceBackend, PreTrainedModel, \
-    AutoConfig, PreTrainedConfig
+    AutoConfig, PreTrainedConfig, BitsAndBytesConfig
 from rich import print
 
 class Config:
@@ -23,7 +25,8 @@ class Config:
                  max_memory: int = 6,
                  cnf: AutoConfig = None,
                  tkn: AutoTokenizer = None,
-                 mdl: PreTrainedModel = None):
+                 mdl: PreTrainedModel = None,
+                 bnb: BitsAndBytesConfig = None):
         """
         Creates a Config object that contains basic information about the training.
         :param epochs: The number of epochs the training will last.
@@ -40,6 +43,7 @@ class Config:
         :param fan_in_fan_out: Some models need this to perform.
         :param batch_size: The batch size for training.
         :param max_memory: The maximum memory the AI can fill in GigaBytes.
+        :param bnb: A bitsandbytes config for Quantized Low Rank Adaption(QLoRA).
         """
         # Turning string to lr
         lr_mapping = {
@@ -59,10 +63,10 @@ class Config:
         checking = {
             "learning_rate": [learning_rate, float, "float or string"],
             "precision": [precision, str, "string, either 16, 32, or 64", lambda: precision not in ["16", "32", "64"]],
-            "attention_layers": [attention_layers, list, "list with string elements", lambda: not all(isinstance(layer, str) for layer in attention_layers)],
+            "attention_layers": [attention_layers, [list, None], "list with string elements", lambda: attention_layers is not None and not all(isinstance(layer, str) for layer in attention_layers)],
             "model": [model_path, str, "string"],
             "fan_in_fan_out": [fan_in_fan_out, bool, "bool"],
-            "cpu_only": [cpu_only, bool, "bool"]
+            "cpu_only": [cpu_only, bool, "bool"],
         }
 
         for i, j in {
@@ -76,7 +80,7 @@ class Config:
             checking.setdefault(i, [j, int, "positive integer", lambda: integer_pos(j)])
 
         for name, values in checking.items():
-            base_check = lambda: not isinstance(values[0], values[1])
+            base_check = lambda: (values[0] is None and None not in values[1]) or (values[0] is not None and not isinstance(values[0], tuple(filter(lambda x: x is not None, values[1] if isinstance(values[1], Iterable) else [values[1]]))))
             check = base_check
             if len(values) == 4:
                 check = lambda: base_check() or values[3]()
@@ -84,10 +88,11 @@ class Config:
                 raise TypeError(f"{name} must be {values[2]}")
 
         model, conf, tokenizer = self.__st__(
-            mdl,
-            cnf,
-            tkn,
-            model_path,
+            mdl if mdl is not None and isinstance(mdl, PreTrainedModel) else None,
+            cnf if cnf is not None and isinstance(cnf, AutoConfig) else None,
+            tkn if tkn is not None and isinstance(tkn, AutoTokenizer) else None,
+            bnb if bnb is not None and isinstance(bnb, BitsAndBytesConfig) else None,
+            model_path if model_path is not None and isinstance(model_path, str) else None,
             precision,
             cpu_only,
             max_memory,
@@ -101,12 +106,15 @@ class Config:
 
             # Finding the attention laters
             for name, module in model.named_modules():
-                if not "Attention" in name:
+                if not any(k in name for k in ["attn", "proj", "attention", "key", "value", "dense", "query"]):
                     continue
                 for subname, submodule in module.named_modules():
                     if subname == "": # To skip the root module
                         continue
                     attention_layers.append(subname)
+
+            # Catching the doubles
+            attention_layers = list(set(attention_layers))
 
             # Confirming the layers to make sure no error is raised later
             print(f"[bold green]Found layers: {"".join(f"{layer} " for layer in attention_layers)}[/]"
@@ -116,16 +124,16 @@ class Config:
             if answer != 'y':
                 raise RuntimeError("Please confirm the model's attention layers or pass the attention layers explicitly.")
 
-        self.__all_layers__ = attention_layers
-        self.__attn_layers__ = attention_layers[:max_layers]
-        self.__model_path__ = model_path
-        self.__model__: PreTrainedModel = model
-        self.__tokenizer__: TokenizersBackend | SentencePieceBackend = tokenizer
+        self._all_layers = attention_layers
+        self._attn_layers = attention_layers[:max_layers]
+        self._model_path = model_path
+        self._model: PreTrainedModel = model
+        self._tokenizer: TokenizersBackend | SentencePieceBackend = tokenizer
         self.epochs = epochs
-        self.__rank__ = rank
-        self.__fifo__ = fan_in_fan_out     # Surely not first in first out
-        self.__lr__: float = learning_rate
-        self.__cpu_only__: bool = cpu_only
+        self._rank = rank
+        self._fifo = fan_in_fan_out     # Surely not first in first out
+        self._lr: float = learning_rate
+        self._cpu_only: bool = cpu_only
         self.batch_size = batch_size
 
     def save_config(self, path: PathLike|str,
@@ -170,16 +178,16 @@ class Config:
             [
                 {
                     "name": model_name,
-                    "all_layers": self.__all_layers__,
-                    "model_path": self.__model_path__
+                    "all_layers": self._all_layers,
+                    "model_path": self._model_path
                 }
             ]
         for conf in range(len(other_configs)):
             to_write.append(
                 {
                     "name": other_config_names[conf],
-                    "all_layers": other_configs[conf].__all_layers__,
-                    "model_path": other_configs[conf].__model_path__
+                    "all_layers": other_configs[conf]._all_layers,
+                    "model_path": other_configs[conf]._model_path
                 }
             )
 
@@ -251,6 +259,7 @@ class Config:
     def __st__(self, mdl: PreTrainedModel = None,
                cnf: PreTrainedConfig = None,
                tkn: TokenizersBackend|SentencePieceBackend = None,
+               bnb: BitsAndBytesConfig = None,
                mdl_path: str = None,
                precision: str = None,
                cpu_only: bool = None,
@@ -267,6 +276,7 @@ class Config:
         :param precision: precision
         :param cpu_only: whether to work CPU-only
         :param mm: max memory
+        :param bnb: A bits and bytes config.
         :return: a tuple of model, config, and tokenizer
         """
         tokenizer = tkn
@@ -290,12 +300,18 @@ class Config:
             conf: PreTrainedConfig = AutoConfig.from_pretrained(mdl_path)
 
         if model is None or not isinstance(model, PreTrainedModel):
-            model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(mdl_path,
-                                                         dtype=float_dict.get(f"float{precision}"),
-                                                         device_map="auto" if not cpu_only else None,
-                                                         offload_folder="./.offloader",
-                                                         max_memory={0: f"{mm}GB"},
-                                                         config=conf)
+            model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+                mdl_path,
+                dtype=float_dict.get(f"float{precision}"),
+                device_map="auto" if not cpu_only else None,
+                offload_folder="./.offloader",
+                max_memory={0: f"{mm}GB"},
+                config=conf,
+                quantization_config=bnb
+            )
+
+            if bnb is not None:
+                model = prepare_model_for_kbit_training(model)
 
 
         return model, conf, tokenizer
